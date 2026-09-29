@@ -1,5 +1,7 @@
 # RL_tmp
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/ode_methods_colab.ipynb)
+
 하나의 2차원 ODE를 기준으로 다음 방법을 비교하는 학습용 프로젝트입니다.
 
 - 수치 ODE solver
