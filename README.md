@@ -38,6 +38,8 @@ Colab: `notebooks/ode_methods_colab.ipynb`
 - Neural SDE
 - Reinforcement Learning (REINFORCE) under stochastic dynamics
 
+SDE의 개별 sample path는 Wiener noise 때문에 일반적인 의미에서 미분 가능하지 않으므로, ODE PINN처럼 path 자체에 미분방정식 residual을 직접 걸기 어렵습니다. 그래서 PINN에서는 SDE가 유도하는 결정론적 확률밀도 PDE인 Fokker-Planck equation을 학습합니다.
+
 ```text
 dq = v dt
 dv = (-k q - c v) dt + sigma dW
