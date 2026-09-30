@@ -4,11 +4,9 @@
 
 같은 2-link arm reaching 문제에서 CEM, PPO, SAC를 각각 독립적으로 학습하고 비교합니다.
 
-각 알고리즘은 별도 Colab 노트북을 사용합니다.
+세 알고리즘은 하나의 Colab 노트북 안에서 섹션을 나눠 각각 독립적으로 학습합니다.
 
-- `notebooks/two_link_cem_colab.ipynb`
-- `notebooks/two_link_ppo_colab.ipynb`
-- `notebooks/two_link_sac_colab.ipynb`
+- `notebooks/two_link_arm_colab.ipynb`
 
 공통 환경과 Euler-Lagrange dynamics는 `src/rl_tmp/two_link_arm/`에 있습니다.
 
