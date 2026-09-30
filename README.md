@@ -4,26 +4,22 @@
 
 [![Open ODE In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/ode_methods_colab.ipynb)
 
-하나의 2차원 ODE를 기준으로 다음 방법을 비교하는 학습용 프로젝트입니다.
+감쇠 조화진동자
 
-- 수치 ODE solver
-- PINN
-- Neural ODE
-- Reinforcement Learning (REINFORCE)
+$$
+x(t)=(q(t),v(t))\in\mathbb{R}^2,
+$$
 
-공통 시스템은 감쇠 조화진동자입니다.
+$$
+\dot q(t)=v(t),\qquad
+\dot v(t)=-kq(t)-cv(t).
+$$
 
-```text
-state x = (q, v)
-dq/dt = v
-dv/dt = -k q - c v
-```
+RL에서는 제어입력 $u(t)\in\mathbb{R}$를 추가합니다.
 
-RL에서는 같은 시스템에 연속 제어 입력 `u`만 추가합니다.
-
-```text
-dv/dt = -k q - c v + u
-```
+$$
+\dot v(t)=-kq(t)-cv(t)+u(t).
+$$
 
 Colab: `notebooks/ode_methods_colab.ipynb`
 
@@ -31,25 +27,25 @@ Colab: `notebooks/ode_methods_colab.ipynb`
 
 [![Open SDE In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/sde_methods_colab.ipynb)
 
-같은 감쇠 조화진동자에 velocity noise를 넣은 SDE를 기준으로 다음 방법을 비교합니다.
+같은 계에 velocity noise를 추가합니다. $W_t$는 1차원 Wiener process입니다.
 
-- Euler-Maruyama numerical solver
-- Gaussian Fokker-Planck PINN (mean/covariance moment residual)
-- Neural SDE
-- Reinforcement Learning (REINFORCE) under stochastic dynamics
+$$
+dq_t=v_t\,dt,
+$$
 
-SDE의 개별 sample path는 Wiener noise 때문에 일반적인 의미에서 미분 가능하지 않으므로, ODE PINN처럼 path 자체에 미분방정식 residual을 직접 걸기 어렵습니다. 그래서 PINN에서는 SDE가 유도하는 결정론적 Fokker-Planck equation을 사용합니다. 현재 예제는 선형 SDE + Gaussian 초기분포이므로 density가 계속 Gaussian이라는 구조를 이용해 mean/covariance moment equation을 PINN residual로 학습하며, density 정규화는 모델 구조로 보장합니다.
+$$
+dv_t=(-kq_t-cv_t)\,dt+\sigma\,dW_t.
+$$
 
-```text
-dq = v dt
-dv = (-k q - c v) dt + sigma dW
-```
+RL에서는
 
-RL에서는 drift에 연속 제어 입력 `u`를 추가합니다.
+$$
+dv_t=(-kq_t-cv_t+u_t)\,dt+\sigma\,dW_t
+$$
 
-```text
-dv = (-k q - c v + u) dt + sigma dW
-```
+를 사용합니다.
+
+SDE sample path는 일반적으로 미분 가능하지 않으므로 PINN은 path가 아니라 Fokker–Planck equation을 대상으로 합니다.
 
 Colab: `notebooks/sde_methods_colab.ipynb`
 
@@ -57,16 +53,79 @@ Colab: `notebooks/sde_methods_colab.ipynb`
 
 [![Open Cart-Pole In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/cartpole_control_colab.ipynb)
 
-비선형 Cart-Pole을 대상으로 다음을 같은 노트북에서 비교합니다.
+상태와 제어입력은
 
-- SciPy `solve_ivp(method="DOP853")` high-accuracy reference
-- continuous-time LQR baseline
-- learned nonlinear vector field / Neural ODE rollout
-- PINN for the nonlinear LQR closed-loop ODE
-- goal-reaching RL policy search (Cross-Entropy Method)
+$$
+x(t)=
+\begin{pmatrix}
+p(t)\\
+\theta(t)\\
+\dot p(t)\\
+\dot\theta(t)
+\end{pmatrix}
+\in\mathbb{R}^4,
+\qquad
+u(t)\in\mathbb{R}.
+$$
 
-검증된 기본 실행에서는 초기 상태 `[x, theta, x_dot, theta_dot] = [0, 0.2, 0, 0]`, 목표 상태 `[0, 0, 0, 0]`에서 LQR의 5초 후 goal distance가 약 `0.0193`이었습니다. RL policy search도 학습한 정책을 실제 비선형 dynamics에 5초 rollout했을 때 final state distance to goal이 약 `0.0449`로 줄어 `goal_tolerance=0.1` 안에 들어왔습니다. Neural ODE의 1초 trajectory MSE는 약 `5.18e-3`, PINN의 1초 closed-loop trajectory MSE는 약 `3.54e-3`였습니다.
+$m_c>0$는 cart mass, $m_p>0$는 pole mass, $\ell>0$는 pole half-length, $g>0$는 중력가속도이고
+
+$$
+M=m_c+m_p,
+$$
+
+$$
+a(x,u)=
+\frac{
+u+m_p\ell\dot\theta^2\sin\theta
+}{M}
+$$
+
+라 두면 현재 코드의 비선형 Cart-Pole dynamics는
+
+$$
+\dot p=\dot p,
+\qquad
+\dot\theta=\dot\theta,
+$$
+
+$$
+\ddot\theta=
+\frac{
+g\sin\theta-\cos\theta\,a(x,u)
+}{
+\ell\left(
+\frac{4}{3}
+-\frac{m_p\cos^2\theta}{M}
+\right)
+},
+$$
+
+$$
+\ddot p=
+a(x,u)
+-
+\frac{
+m_p\ell\ddot\theta\cos\theta
+}{M}.
+$$
+
+즉
+
+$$
+\dot x(t)=f(x(t),u(t)),
+\qquad
+f:\mathbb{R}^4\times\mathbb{R}\to\mathbb{R}^4.
+$$
+
+목표 상태는
+
+$$
+x_{\mathrm{goal}}=(0,0,0,0).
+$$
+
+전체 vector field는 4차원이므로 한 평면에 직접 그릴 수 없습니다. 노트북에서는 $p=\dot p=0$으로 고정한 $(\theta,\dot\theta)$ 2차원 slice에서 uncontrolled / LQR / learned closed-loop vector field와 trajectory를 시각화합니다.
 
 Colab: `notebooks/cartpole_control_colab.ipynb`
 
-핵심 구현은 `src/rl_tmp/*.py`에 있고, Colab 노트북은 의존성 설치, git clone, 사용자 입력, 학습 실행, 결과 출력만 담당합니다.
+핵심 구현은 `src/rl_tmp/*.py`에 있습니다.
