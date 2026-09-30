@@ -53,4 +53,20 @@ dv = (-k q - c v + u) dt + sigma dW
 
 Colab: `notebooks/sde_methods_colab.ipynb`
 
+## Nonlinear Cart-Pole Control
+
+[![Open Cart-Pole In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/cartpole_control_colab.ipynb)
+
+비선형 Cart-Pole을 대상으로 다음을 같은 노트북에서 비교합니다.
+
+- SciPy `solve_ivp(method="DOP853")` high-accuracy reference
+- continuous-time LQR baseline
+- learned nonlinear vector field / Neural ODE rollout
+- PINN for the nonlinear LQR closed-loop ODE
+- PPO control with discrete forces `{-10, +10}`
+
+검증된 기본 실행에서는 초기 상태 `[x, theta, x_dot, theta_dot] = [0, 0.2, 0, 0]`에서 LQR이 5초 후 state norm 약 `0.0193`에 도달했고, PPO도 같은 초기 pole angle에서 5초 rollout을 실패 없이 유지했습니다. Neural ODE의 1초 trajectory MSE는 약 `2.0e-4`, PINN의 1초 closed-loop trajectory MSE는 약 `2.83e-2`였습니다.
+
+Colab: `notebooks/cartpole_control_colab.ipynb`
+
 핵심 구현은 `src/rl_tmp/*.py`에 있고, Colab 노트북은 의존성 설치, git clone, 사용자 입력, 학습 실행, 결과 출력만 담당합니다.
