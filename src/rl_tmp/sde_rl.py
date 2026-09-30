@@ -1,11 +1,16 @@
+from copy import deepcopy
 from dataclasses import dataclass
+import math
 
 import torch
 from torch import nn
 from torch.distributions import Normal
 
-from .sde_solver import euler_maruyama_step
-from .sde_system import SDEOscillatorConfig, controlled_sde_drift, sde_diffusion
+from .sde_system import (
+    SDEOscillatorConfig,
+    controlled_sde_drift,
+    sde_diffusion,
+)
 
 
 @dataclass
@@ -33,24 +38,31 @@ class GaussianSDEPolicy(nn.Module):
         std = self.log_std.exp().expand_as(mean)
         return Normal(mean, std)
 
-    def deterministic_action(self, state: torch.Tensor, max_action: float) -> torch.Tensor:
+    def deterministic_action(
+        self,
+        state: torch.Tensor,
+        max_action: float,
+    ) -> torch.Tensor:
         return max_action * torch.tanh(self.mean_network(state))
 
 
-def discounted_returns(
-    rewards: list[torch.Tensor],
+def _discounted_returns(
+    rewards: torch.Tensor,
     gamma: float,
 ) -> torch.Tensor:
-    returns = []
-    running = torch.zeros_like(rewards[0])
+    """rewards: [time, batch] -> returns: [time, batch]."""
+    returns = torch.zeros_like(rewards)
+    running = torch.zeros(
+        rewards.shape[1],
+        dtype=rewards.dtype,
+        device=rewards.device,
+    )
 
-    for reward in reversed(rewards):
-        running = reward + gamma * running
-        returns.append(running)
+    for index in range(rewards.shape[0] - 1, -1, -1):
+        running = rewards[index] + gamma * running
+        returns[index] = running
 
-    returns.reverse()
-    values = torch.stack(returns)
-    return (values - values.mean()) / (values.std() + 1e-8)
+    return returns
 
 
 def train_sde_reinforce(
@@ -59,81 +71,160 @@ def train_sde_reinforce(
     config: SDEOscillatorConfig,
     t_final: float,
     dt: float = 0.05,
-    episodes: int = 1000,
+    episodes: int = 8000,
+    batch_size: int = 32,
     hidden_dim: int = 64,
     hidden_layers: int = 2,
     learning_rate: float = 3e-4,
     gamma: float = 0.99,
     action_cost: float = 0.01,
     max_action: float = 3.0,
+    gradient_clip: float = 1.0,
     seed: int = 0,
     device: str = "cpu",
 ) -> SDERLResult:
     torch.manual_seed(seed)
 
-    policy = GaussianSDEPolicy(hidden_dim=hidden_dim, hidden_layers=hidden_layers).to(device)
+    policy = GaussianSDEPolicy(
+        hidden_dim=hidden_dim,
+        hidden_layers=hidden_layers,
+    ).to(device)
+
     initial_state = initial_state.to(device)
     goal_state = goal_state.to(device)
 
-    optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
-    horizon = max(1, int(round(t_final / dt)))
-    history = {"episode_return": []}
+    optimizer = torch.optim.Adam(
+        policy.parameters(),
+        lr=learning_rate,
+    )
 
-    for _ in range(episodes):
-        state = initial_state.clone()
-        log_probs: list[torch.Tensor] = []
-        rewards: list[torch.Tensor] = []
+    horizon = max(1, int(round(t_final / dt)))
+    updates = max(1, math.ceil(episodes / batch_size))
+
+    history = {"mean_episode_return": []}
+
+    best_return = -float("inf")
+    best_state_dict = deepcopy(policy.state_dict())
+
+    for update in range(updates):
+        current_batch_size = min(
+            batch_size,
+            episodes - update * batch_size,
+        )
+
+        state = initial_state.unsqueeze(0).repeat(
+            current_batch_size,
+            1,
+        )
+
+        log_probs = []
+        rewards = []
 
         for step in range(horizon):
             distribution = policy.distribution(state)
             raw_action = distribution.sample()
             action = max_action * torch.tanh(raw_action)
-            log_prob = distribution.log_prob(raw_action).sum()
 
-            t = torch.tensor(step * dt, device=device)
-            dt_tensor = torch.tensor(dt, device=device)
-            noise = torch.randn_like(state)
+            log_prob = distribution.log_prob(raw_action).sum(dim=-1)
 
-            def drift(current_time: torch.Tensor, current_state: torch.Tensor) -> torch.Tensor:
-                return controlled_sde_drift(
-                    current_time,
-                    current_state,
-                    action,
-                    config,
-                )
-
-            def diffusion(current_time: torch.Tensor, current_state: torch.Tensor) -> torch.Tensor:
-                return sde_diffusion(current_time, current_state, config)
-
-            next_state = euler_maruyama_step(
-                drift=drift,
-                diffusion=diffusion,
-                t=t,
-                state=state,
-                dt=dt_tensor,
-                noise=noise,
+            t = torch.tensor(
+                step * dt,
+                dtype=state.dtype,
+                device=device,
             )
 
-            state_cost = (next_state - goal_state).square().sum()
-            control_cost = action_cost * action.square().sum()
+            drift = controlled_sde_drift(
+                t=t,
+                state=state,
+                action=action,
+                config=config,
+            )
+            diffusion = sde_diffusion(
+                t=t,
+                state=state,
+                config=config,
+            )
+            noise = torch.randn_like(state)
+
+            next_state = (
+                state
+                + drift * dt
+                + diffusion * math.sqrt(dt) * noise
+            )
+
+            state_cost = (
+                next_state - goal_state.unsqueeze(0)
+            ).square().sum(dim=-1)
+
+            control_cost = (
+                action_cost
+                * action.square().sum(dim=-1)
+            )
+
             reward = -(state_cost + control_cost)
 
             log_probs.append(log_prob)
             rewards.append(reward.detach())
             state = next_state.detach()
 
-        returns = discounted_returns(rewards, gamma)
         log_prob_tensor = torch.stack(log_probs)
-        loss = -(log_prob_tensor * returns).mean()
+        reward_tensor = torch.stack(rewards)
+
+        returns = _discounted_returns(
+            rewards=reward_tensor,
+            gamma=gamma,
+        )
+
+        baseline = returns.mean(
+            dim=1,
+            keepdim=True,
+        )
+
+        advantages = returns - baseline
+        advantages = (
+            advantages - advantages.mean()
+        ) / (
+            advantages.std() + 1e-8
+        )
+
+        loss = -(
+            log_prob_tensor * advantages
+        ).mean()
 
         optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            policy.parameters(),
+            max_norm=gradient_clip,
+        )
         optimizer.step()
 
-        episode_return = torch.stack(rewards).sum()
-        history["episode_return"].append(float(episode_return.cpu()))
+        with torch.no_grad():
+            policy.log_std.clamp_(
+                min=-2.5,
+                max=0.5,
+            )
 
-    return SDERLResult(policy=policy, history=history)
+        mean_episode_return = (
+            reward_tensor.sum(dim=0).mean()
+        ).item()
+
+        history["mean_episode_return"].append(
+            mean_episode_return
+        )
+
+        if mean_episode_return > best_return:
+            best_return = mean_episode_return
+            best_state_dict = deepcopy(
+                policy.state_dict()
+            )
+
+    policy.load_state_dict(best_state_dict)
+
+    return SDERLResult(
+        policy=policy,
+        history=history,
+    )
 
 
 @torch.no_grad()
@@ -157,30 +248,34 @@ def rollout_sde_policy(
     actions = []
 
     for step in range(horizon):
-        action = policy.deterministic_action(state, max_action=max_action)
+        action = policy.deterministic_action(
+            state,
+            max_action=max_action,
+        )
 
-        t = torch.tensor(step * dt, device=device)
-        dt_tensor = torch.tensor(dt, device=device)
-        noise = torch.randn_like(state)
+        t = torch.tensor(
+            step * dt,
+            dtype=state.dtype,
+            device=device,
+        )
 
-        def drift(current_time: torch.Tensor, current_state: torch.Tensor) -> torch.Tensor:
-            return controlled_sde_drift(
-                current_time,
-                current_state,
-                action,
-                config,
-            )
-
-        def diffusion(current_time: torch.Tensor, current_state: torch.Tensor) -> torch.Tensor:
-            return sde_diffusion(current_time, current_state, config)
-
-        state = euler_maruyama_step(
-            drift=drift,
-            diffusion=diffusion,
+        drift = controlled_sde_drift(
             t=t,
             state=state,
-            dt=dt_tensor,
-            noise=noise,
+            action=action,
+            config=config,
+        )
+        diffusion = sde_diffusion(
+            t=t,
+            state=state,
+            config=config,
+        )
+        noise = torch.randn_like(state)
+
+        state = (
+            state
+            + drift * dt
+            + diffusion * math.sqrt(dt) * noise
         )
 
         actions.append(action.cpu())
