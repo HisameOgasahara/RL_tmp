@@ -34,11 +34,11 @@ Colab: `notebooks/ode_methods_colab.ipynb`
 같은 감쇠 조화진동자에 velocity noise를 넣은 SDE를 기준으로 다음 방법을 비교합니다.
 
 - Euler-Maruyama numerical solver
-- Fokker-Planck PINN
+- Gaussian Fokker-Planck PINN (mean/covariance moment residual)
 - Neural SDE
 - Reinforcement Learning (REINFORCE) under stochastic dynamics
 
-SDE의 개별 sample path는 Wiener noise 때문에 일반적인 의미에서 미분 가능하지 않으므로, ODE PINN처럼 path 자체에 미분방정식 residual을 직접 걸기 어렵습니다. 그래서 PINN에서는 SDE가 유도하는 결정론적 확률밀도 PDE인 Fokker-Planck equation을 학습합니다.
+SDE의 개별 sample path는 Wiener noise 때문에 일반적인 의미에서 미분 가능하지 않으므로, ODE PINN처럼 path 자체에 미분방정식 residual을 직접 걸기 어렵습니다. 그래서 PINN에서는 SDE가 유도하는 결정론적 Fokker-Planck equation을 사용합니다. 현재 예제는 선형 SDE + Gaussian 초기분포이므로 density가 계속 Gaussian이라는 구조를 이용해 mean/covariance moment equation을 PINN residual로 학습하며, density 정규화는 모델 구조로 보장합니다.
 
 ```text
 dq = v dt
