@@ -35,7 +35,7 @@ class SACCheckpointCallback(
         ):
             self.snapshots[
                 "early"
-            ] = self.model.policy.state_dict()
+            ] = _snapshot_policy(self.model.policy)
 
         if (
             "middle"
@@ -44,7 +44,7 @@ class SACCheckpointCallback(
         ):
             self.snapshots[
                 "middle"
-            ] = self.model.policy.state_dict()
+            ] = _snapshot_policy(self.model.policy)
 
         return True
 
@@ -90,7 +90,7 @@ def train_sac(
 
     callback.snapshots[
         "final"
-    ] = model.policy.state_dict()
+    ] = _snapshot_policy(model.policy)
 
     return (
         model,
