@@ -101,14 +101,13 @@ g\sin\theta-\cos\theta\,a(x,u)
 },
 $$
 
-$$
-\ddot p=
+$
+\ddot p
+=
 a(x,u)
 -
-\frac{
-m_p\ell\ddot\theta\cos\theta
-}{M}.
-$$
+\frac{m_p\ell\ddot\theta\cos\theta}{M}.
+$
 
 즉
 
