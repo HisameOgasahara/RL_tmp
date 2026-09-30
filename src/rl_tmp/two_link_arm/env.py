@@ -153,12 +153,18 @@ class TwoLinkArmEnv(gym.Env):
             * self.config.max_torque
         )
 
-        self.state = rk4_step(
-            state=self.state,
-            torque=torque,
-            dt=self.dt,
-            config=self.config,
+        integration_dt = (
+            self.dt
+            / 4.0
         )
+
+        for _ in range(4):
+            self.state = rk4_step(
+                state=self.state,
+                torque=torque,
+                dt=integration_dt,
+                config=self.config,
+            )
 
         self.step_count += 1
 
