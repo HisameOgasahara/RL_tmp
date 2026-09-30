@@ -32,7 +32,6 @@
 
 [![Open 2-Link Arm In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/two_link_arm_colab.ipynb)
 
-하나의 노트북에서 CEM, PPO, SAC를 각각 독립적으로 학습하고 같은 Euler-Lagrange 2-link arm에서 비교합니다.
 
 - Notebook: `notebooks/two_link_arm_colab.ipynb`
 - Code: `src/rl_tmp/two_link_arm/`
