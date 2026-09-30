@@ -63,9 +63,9 @@ Colab: `notebooks/sde_methods_colab.ipynb`
 - continuous-time LQR baseline
 - learned nonlinear vector field / Neural ODE rollout
 - PINN for the nonlinear LQR closed-loop ODE
-- PPO control with discrete forces `{-10, +10}`
+- goal-reaching RL policy search (Cross-Entropy Method)
 
-검증된 기본 실행에서는 초기 상태 `[x, theta, x_dot, theta_dot] = [0, 0.2, 0, 0]`에서 LQR이 5초 후 state norm 약 `0.0193`에 도달했습니다. 개선 후 PPO도 같은 초기 상태에서 5초 rollout에 성공했고, rollout 동안 `max |x| ≈ 0.4804`, `max |theta| = 0.2`였습니다. Neural ODE의 1초 trajectory MSE는 약 `5.18e-3`, PINN의 1초 closed-loop trajectory MSE는 약 `3.54e-3`였습니다.
+검증된 기본 실행에서는 초기 상태 `[x, theta, x_dot, theta_dot] = [0, 0.2, 0, 0]`, 목표 상태 `[0, 0, 0, 0]`에서 LQR의 5초 후 goal distance가 약 `0.0193`이었습니다. RL policy search도 학습한 정책을 실제 비선형 dynamics에 5초 rollout했을 때 final state distance to goal이 약 `0.0449`로 줄어 `goal_tolerance=0.1` 안에 들어왔습니다. Neural ODE의 1초 trajectory MSE는 약 `5.18e-3`, PINN의 1초 closed-loop trajectory MSE는 약 `3.54e-3`였습니다.
 
 Colab: `notebooks/cartpole_control_colab.ipynb`
 
