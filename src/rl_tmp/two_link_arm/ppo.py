@@ -4,6 +4,13 @@ from stable_baselines3.common.callbacks import BaseCallback
 from .env import TwoLinkArmEnv
 
 
+def _snapshot_policy(policy):
+    return {
+        key: value.detach().cpu().clone()
+        for key, value in policy.state_dict().items()
+    }
+
+
 class PPOCheckpointCallback(
     BaseCallback
 ):
