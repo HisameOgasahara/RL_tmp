@@ -28,19 +28,12 @@
 - Code: `src/rl_tmp/cartpole_control/`
 - Details: [docs/cartpole_control.md](docs/cartpole_control.md)
 
-### PyBullet 2-link arm — CEM
+### PyBullet 2-link arm — CEM / PPO / SAC
 
-[![Open 2-Link CEM In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/two_link_cem_colab.ipynb)
+[![Open 2-Link Arm In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/two_link_arm_colab.ipynb)
 
-### PyBullet 2-link arm — PPO
+하나의 노트북에서 CEM, PPO, SAC를 각각 독립적으로 학습하고 같은 Euler-Lagrange 2-link arm에서 비교합니다.
 
-[![Open 2-Link PPO In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/two_link_ppo_colab.ipynb)
-
-### PyBullet 2-link arm — SAC
-
-[![Open 2-Link SAC In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/HisameOgasahara/RL_tmp/blob/main/notebooks/two_link_sac_colab.ipynb)
-
-세 알고리즘은 같은 Euler-Lagrange 2-link arm 환경을 각각 독립적으로 학습합니다. PyBullet 로봇팔 애니메이션과 상태공간 trajectory를 같은 rollout에서 동기화해 비교합니다.
-
+- Notebook: `notebooks/two_link_arm_colab.ipynb`
 - Code: `src/rl_tmp/two_link_arm/`
 - Details: [docs/two_link_arm.md](docs/two_link_arm.md)
