@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 import torch
 from torch import nn
@@ -13,18 +14,57 @@ class FPEPINNResult:
 
 
 class DensityPINN(nn.Module):
-    """rho_theta: R x R^2 -> R_{>0}."""
+    """Gaussian density rho_theta: R x R^2 -> R_{>0} with exact initial moments."""
 
-    def __init__(self, hidden_dim: int = 64, hidden_layers: int = 3):
+    def __init__(
+        self,
+        initial_mean: torch.Tensor,
+        initial_std: float,
+        hidden_dim: int = 64,
+        hidden_layers: int = 2,
+    ):
         super().__init__()
 
-        layers: list[nn.Module] = [nn.Linear(3, hidden_dim), nn.Tanh()]
+        layers: list[nn.Module] = [nn.Linear(1, hidden_dim), nn.Tanh()]
         for _ in range(hidden_layers - 1):
             layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.Tanh()])
-        layers.append(nn.Linear(hidden_dim, 1))
+        layers.append(nn.Linear(hidden_dim, 5))
 
         self.network = nn.Sequential(*layers)
-        self.positive = nn.Softplus()
+        self.register_buffer("initial_mean", initial_mean.detach().clone().float())
+        self.initial_std = float(initial_std)
+        self.base_diagonal = math.log(math.expm1(self.initial_std))
+
+    def moments(
+        self,
+        time: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if time.ndim == 1:
+            time = time.unsqueeze(-1)
+
+        raw = self.network(time)
+
+        mean = self.initial_mean.unsqueeze(0) + time * raw[:, 0:2]
+
+        diagonal_1 = torch.nn.functional.softplus(
+            self.base_diagonal + time[:, 0] * raw[:, 2]
+        ) + 1e-4
+        lower_off_diagonal = time[:, 0] * raw[:, 3]
+        diagonal_2 = torch.nn.functional.softplus(
+            self.base_diagonal + time[:, 0] * raw[:, 4]
+        ) + 1e-4
+
+        cholesky = torch.zeros(
+            (time.shape[0], 2, 2),
+            dtype=time.dtype,
+            device=time.device,
+        )
+        cholesky[:, 0, 0] = diagonal_1
+        cholesky[:, 1, 0] = lower_off_diagonal
+        cholesky[:, 1, 1] = diagonal_2
+
+        covariance = cholesky @ cholesky.transpose(-1, -2)
+        return mean, covariance
 
     def forward(
         self,
@@ -33,76 +73,106 @@ class DensityPINN(nn.Module):
     ) -> torch.Tensor:
         if time.ndim == 1:
             time = time.unsqueeze(-1)
-        values = torch.cat((time, state), dim=-1)
-        return self.positive(self.network(values)) + 1e-8
+
+        mean, covariance = self.moments(time)
+        difference = state - mean
+        inverse_covariance = torch.linalg.inv(covariance)
+
+        quadratic = torch.einsum(
+            "bi,bij,bj->b",
+            difference,
+            inverse_covariance,
+            difference,
+        ).unsqueeze(-1)
+
+        determinant = torch.linalg.det(covariance).unsqueeze(-1)
+        normalizer = 2.0 * torch.pi * torch.sqrt(determinant)
+
+        return torch.exp(-0.5 * quadratic) / normalizer
 
 
-def gaussian_density(
-    state: torch.Tensor,
-    mean: torch.Tensor,
-    std: float,
-) -> torch.Tensor:
-    variance = std**2
-    difference = state - mean
-    exponent = -0.5 * difference.square().sum(dim=-1, keepdim=True) / variance
-    normalizer = 2.0 * torch.pi * variance
-    return torch.exp(exponent) / normalizer
-
-
-def fpe_residual(
+def fpe_moment_residuals(
     model: DensityPINN,
-    time: torch.Tensor,
-    state: torch.Tensor,
+    times: torch.Tensor,
     config: SDEOscillatorConfig,
-) -> torch.Tensor:
-    time = time.detach().clone().requires_grad_(True)
-    state = state.detach().clone().requires_grad_(True)
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    For this linear SDE with Gaussian initial density, the Fokker-Planck PDE
+    is equivalent to ODEs for mean mu(t) and covariance Sigma(t):
 
-    rho = model(time, state)
-    rho_t = torch.autograd.grad(
-        rho,
-        time,
-        grad_outputs=torch.ones_like(rho),
-        create_graph=True,
-    )[0]
+        dmu/dt = A mu
+        dSigma/dt = A Sigma + Sigma A^T + B B^T
+    """
+    times = times.detach().clone().requires_grad_(True)
+    mean, covariance = model.moments(times)
 
-    rho_grad = torch.autograd.grad(
-        rho,
-        state,
-        grad_outputs=torch.ones_like(rho),
-        create_graph=True,
-    )[0]
+    mean_derivative_components = []
+    for index in range(2):
+        component = mean[:, index:index + 1]
+        derivative = torch.autograd.grad(
+            component,
+            times,
+            grad_outputs=torch.ones_like(component),
+            create_graph=True,
+        )[0]
+        mean_derivative_components.append(derivative[:, 0])
 
-    q = state[:, 0:1]
-    v = state[:, 1:2]
-    drift_q = v
-    drift_v = -config.spring * q - config.damping * v
+    mean_derivative = torch.stack(mean_derivative_components, dim=-1)
 
-    flux_q = drift_q * rho
-    flux_v = drift_v * rho
+    covariance_derivative_rows = []
+    for row in range(2):
+        row_derivatives = []
+        for column in range(2):
+            component = covariance[:, row, column:column + 1]
+            derivative = torch.autograd.grad(
+                component,
+                times,
+                grad_outputs=torch.ones_like(component),
+                create_graph=True,
+            )[0]
+            row_derivatives.append(derivative[:, 0])
 
-    flux_q_grad = torch.autograd.grad(
-        flux_q,
-        state,
-        grad_outputs=torch.ones_like(flux_q),
-        create_graph=True,
-    )[0][:, 0:1]
-    flux_v_grad = torch.autograd.grad(
-        flux_v,
-        state,
-        grad_outputs=torch.ones_like(flux_v),
-        create_graph=True,
-    )[0][:, 1:2]
+        covariance_derivative_rows.append(
+            torch.stack(row_derivatives, dim=-1)
+        )
 
-    rho_v = rho_grad[:, 1:2]
-    rho_vv = torch.autograd.grad(
-        rho_v,
-        state,
-        grad_outputs=torch.ones_like(rho_v),
-        create_graph=True,
-    )[0][:, 1:2]
+    covariance_derivative = torch.stack(
+        covariance_derivative_rows,
+        dim=1,
+    )
 
-    return rho_t + flux_q_grad + flux_v_grad - 0.5 * config.noise**2 * rho_vv
+    drift_matrix = torch.tensor(
+        [
+            [0.0, 1.0],
+            [-config.spring, -config.damping],
+        ],
+        dtype=times.dtype,
+        device=times.device,
+    )
+
+    diffusion_covariance = torch.tensor(
+        [
+            [0.0, 0.0],
+            [0.0, config.noise**2],
+        ],
+        dtype=times.dtype,
+        device=times.device,
+    )
+
+    target_mean_derivative = mean @ drift_matrix.transpose(0, 1)
+
+    target_covariance_derivative = (
+        drift_matrix.unsqueeze(0) @ covariance
+        + covariance @ drift_matrix.transpose(0, 1).unsqueeze(0)
+        + diffusion_covariance.unsqueeze(0)
+    )
+
+    mean_residual = mean_derivative - target_mean_derivative
+    covariance_residual = (
+        covariance_derivative - target_covariance_derivative
+    )
+
+    return mean_residual, covariance_residual
 
 
 def train_fpe_pinn(
@@ -113,48 +183,72 @@ def train_fpe_pinn(
     q_range: tuple[float, float] = (-3.0, 3.0),
     v_range: tuple[float, float] = (-3.0, 3.0),
     steps: int = 2500,
-    collocation_points: int = 256,
+    collocation_points: int = 128,
     initial_points: int = 256,
     hidden_dim: int = 64,
-    hidden_layers: int = 3,
+    hidden_layers: int = 2,
     learning_rate: float = 1e-3,
     initial_weight: float = 10.0,
     seed: int = 0,
     device: str = "cpu",
 ) -> FPEPINNResult:
+    del q_range
+    del v_range
+    del initial_points
+    del initial_weight
+
     torch.manual_seed(seed)
 
-    model = DensityPINN(hidden_dim=hidden_dim, hidden_layers=hidden_layers).to(device)
-    initial_mean = initial_mean.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    history = {"total": [], "fpe": [], "initial": []}
+    model = DensityPINN(
+        initial_mean=initial_mean,
+        initial_std=initial_std,
+        hidden_dim=hidden_dim,
+        hidden_layers=hidden_layers,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+    )
+
+    history = {
+        "total": [],
+        "mean_residual": [],
+        "covariance_residual": [],
+    }
 
     for _ in range(steps):
-        time = torch.rand(collocation_points, 1, device=device) * t_final
-        q = q_range[0] + (q_range[1] - q_range[0]) * torch.rand(collocation_points, 1, device=device)
-        v = v_range[0] + (v_range[1] - v_range[0]) * torch.rand(collocation_points, 1, device=device)
-        state = torch.cat((q, v), dim=-1)
+        times = torch.rand(
+            collocation_points,
+            1,
+            device=device,
+        ) * t_final
 
-        residual = fpe_residual(model=model, time=time, state=state, config=config)
-        fpe_loss = residual.square().mean()
+        mean_residual, covariance_residual = fpe_moment_residuals(
+            model=model,
+            times=times,
+            config=config,
+        )
 
-        initial_q = q_range[0] + (q_range[1] - q_range[0]) * torch.rand(initial_points, 1, device=device)
-        initial_v = v_range[0] + (v_range[1] - v_range[0]) * torch.rand(initial_points, 1, device=device)
-        initial_state = torch.cat((initial_q, initial_v), dim=-1)
-        initial_time = torch.zeros(initial_points, 1, device=device)
-
-        target_density = gaussian_density(initial_state, initial_mean, initial_std)
-        predicted_density = model(initial_time, initial_state)
-        initial_loss = (predicted_density - target_density).square().mean()
-
-        total_loss = fpe_loss + initial_weight * initial_loss
+        mean_loss = mean_residual.square().mean()
+        covariance_loss = covariance_residual.square().mean()
+        total_loss = mean_loss + covariance_loss
 
         optimizer.zero_grad()
         total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(
+            model.parameters(),
+            max_norm=5.0,
+        )
         optimizer.step()
 
         history["total"].append(float(total_loss.detach().cpu()))
-        history["fpe"].append(float(fpe_loss.detach().cpu()))
-        history["initial"].append(float(initial_loss.detach().cpu()))
+        history["mean_residual"].append(float(mean_loss.detach().cpu()))
+        history["covariance_residual"].append(
+            float(covariance_loss.detach().cpu())
+        )
 
-    return FPEPINNResult(model=model, history=history)
+    return FPEPINNResult(
+        model=model,
+        history=history,
+    )
