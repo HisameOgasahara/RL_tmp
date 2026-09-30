@@ -123,4 +123,4 @@ x_{\mathrm{goal}}=(0,0,0,0)
 
 Colab: `notebooks/cartpole_control_colab.ipynb`
 
-핵심 구현은 `src/rl_tmp/*.py`에 있습니다.
+핵심 구현은 노트북별로 `src/rl_tmp/ode_methods/`, `src/rl_tmp/sde_methods/`, `src/rl_tmp/cartpole_control/`에 분리되어 있습니다.
