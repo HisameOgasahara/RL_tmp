@@ -65,7 +65,7 @@ Colab: `notebooks/sde_methods_colab.ipynb`
 - PINN for the nonlinear LQR closed-loop ODE
 - PPO control with discrete forces `{-10, +10}`
 
-검증된 기본 실행에서는 초기 상태 `[x, theta, x_dot, theta_dot] = [0, 0.2, 0, 0]`에서 LQR이 5초 후 state norm 약 `0.0193`에 도달했고, PPO도 같은 초기 pole angle에서 5초 rollout을 실패 없이 유지했습니다. Neural ODE의 1초 trajectory MSE는 약 `2.0e-4`, PINN의 1초 closed-loop trajectory MSE는 약 `2.83e-2`였습니다.
+검증된 기본 실행에서는 초기 상태 `[x, theta, x_dot, theta_dot] = [0, 0.2, 0, 0]`에서 LQR이 5초 후 state norm 약 `0.0193`에 도달했습니다. 개선 후 PPO도 같은 초기 상태에서 5초 rollout에 성공했고, rollout 동안 `max |x| ≈ 0.4804`, `max |theta| = 0.2`였습니다. Neural ODE의 1초 trajectory MSE는 약 `5.18e-3`, PINN의 1초 closed-loop trajectory MSE는 약 `3.54e-3`였습니다.
 
 Colab: `notebooks/cartpole_control_colab.ipynb`
 
